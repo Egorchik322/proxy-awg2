@@ -1,0 +1,30 @@
+services:
+  awg2:
+    build: .
+    container_name: awg2
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    volumes:
+      - ./awg-config:/config:ro
+    ports:
+      - "192.168.0.8:38109:38108"
+    restart: unless-stopped
+
+  proxy-awg2:
+    image: ghcr.io/senseunit/dumbproxy:latest
+    container_name: proxy-awg2
+    network_mode: "service:awg2"
+    entrypoint: ["/dumbproxy"]
+    command:
+      - "-bind-address"
+      - ":38108"
+    volumes:
+      - ./resolv.conf:/etc/resolv.conf:ro
+    depends_on:
+      - awg2
+    restart: unless-stopped
