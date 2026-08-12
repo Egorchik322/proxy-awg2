@@ -1,84 +1,136 @@
 # proxy-awg2
 
-HTTP-прокси через AmneziaWG2 для сервера docker02.
+HTTP-прокси с выходом в интернет через туннель AmneziaWG 2.0.
 
-Проект запускает два контейнера:
+Проект работает на `docker02`. Адрес прокси в локальной сети:
 
-- awg2: VPN-клиент AmneziaWG2
-- proxy-awg2: HTTP-прокси dumbproxy в той же сетевой namespace
+```text
+http://192.168.0.8:38109
+```
 
-Маршруты хоста не меняются. Вся VPN-маршрутизация изолирована внутри Docker-контейнера.
+## Архитектура
 
-## Сервер
+Compose запускает два контейнера:
 
-Сервер: docker02
-Адрес прокси: http://192.168.0.8:38109
-VPN-интерфейс: awg0
-Протокол: AmneziaWG2
-Путь проекта: /opt/docker/proxy-awg2
+- `awg2` поднимает VPN-интерфейс `awg0`.
+- `proxy-awg2` запускает `dumbproxy` в сетевом пространстве `awg2`.
 
-## Файлы
+```text
+LAN-клиент
+  -> 192.168.0.8:38109
+  -> dumbproxy
+  -> awg0
+  -> AmneziaWG 2.0
+  -> интернет
+```
 
-Dockerfile
-docker-compose.yml
-start.sh
-resolv.conf.example
+VPN-маршрутизация изолирована внутри контейнера и не изменяет маршруты хоста `docker02`.
+
+`start.sh` добавляет маршрут для `192.168.0.0/24` через `eth0`, чтобы ответы клиентам локальной сети не уходили в VPN.
+
+## Совместимость
+
+Клиент зафиксирован на AWG 2.0:
+
+- `amneziawg-go v0.2.19`
+- `amneziawg-tools v1.0.20260618-2`
+
+Туннель принудительно использует `amneziawg-go`. Kernel-модуль AmneziaWG на Docker-хосте не требуется.
+
+Это позволяет работать с self-hosted сервером AWG 2.0, даже если на `docker02` установлен kernel-модуль AWG 3.0.
+
+Версии клиента нельзя обновлять без проверки совместимости с сервером.
+
+## Локальная конфигурация
+
+Рабочие файлы, которые не коммитятся:
+
+```text
+awg-config/awg0.conf
+resolv.conf
+```
+
+Примеры конфигурации:
+
+```text
 awg-config/awg0.conf.example
+resolv.conf.example
+```
 
-Настоящие VPN-конфиги не коммитятся.
+## Сборка и запуск
 
-Игнорируемые чувствительные файлы:
-
-- awg-config/awg0.conf
-- awg-config/awg0.conf.bak
-- resolv.conf
-- .env
-- *.key
-- *.pem
-- *.log
-- state/
-- tmp/
-
-## Запуск
-
+```bash
 cd /opt/docker/proxy-awg2
-docker compose up -d --build --wait --wait-timeout 60
+docker compose build awg2
+docker compose up -d --wait --wait-timeout 60
+```
 
-## Остановка
+## Управление
 
-cd /opt/docker/proxy-awg2
+```bash
+# Состояние
+docker compose ps
+
+# Перезапуск
+docker compose restart
+
+# Полное пересоздание
 docker compose down
+docker compose up -d --wait --wait-timeout 60
+
+# Остановка
+docker compose down
+```
+
+Контейнер `awg2` имеет healthcheck. `proxy-awg2` запускается после готовности VPN и использует:
+
+```yaml
+network_mode: "service:awg2"
+```
 
 ## Проверка
 
-docker exec awg2 awg show
-docker exec awg2 ip addr show awg0
-docker exec awg2 ip route show table 51820
-curl -x http://192.168.0.8:38109 https://ifconfig.me/ip
+```bash
+docker exec awg2 pgrep -a amneziawg-go
+docker exec awg2 ip -brief link show awg0
+docker exec awg2 awg show awg0
+```
 
-## Примечания
+Проверка HTTP-прокси:
 
-Клиент зафиксирован на AWG 2.0 и принудительно использует amneziawg-go. Kernel-модуль AmneziaWG на Docker-хосте не требуется.
+```bash
+curl -fsS --max-time 30 \
+  --proxy http://192.168.0.8:38109 \
+  https://api.ipify.org
+echo
+```
 
-Проверка модуля:
+Просмотр журналов:
 
-modprobe amneziawg
-lsmod | grep amneziawg
-
-start.sh добавляет маршрут для локальной сети, чтобы ответы прокси в 192.168.0.0/24 возвращались через eth0, а не через VPN-туннель.
+```bash
+docker compose logs --tail 200 awg2
+docker compose logs --tail 200 proxy-awg2
+```
 
 ## Безопасность Git
 
-Перед каждым push проверяй отслеживаемые файлы:
+Перед отправкой изменений:
 
+```bash
 git status --short
 git ls-files
+git diff --cached
+```
 
-Эти файлы не должны появляться в git ls-files:
+В Git не должны попадать:
 
-- awg-config/awg0.conf
-- awg-config/awg0.conf.bak
-- resolv.conf
-- .env
-- private keys
-- logs
+```text
+awg-config/awg0.conf
+resolv.conf
+.env
+*.key
+*.pem
+*.log
+state/
+tmp/
+```
