@@ -42,7 +42,7 @@ awg-config/awg0.conf.example
 ## Запуск
 
 cd /opt/docker/proxy-awg2
-docker compose up -d --build
+docker compose up -d --build --wait --wait-timeout 60
 
 ## Остановка
 
@@ -58,7 +58,7 @@ curl -x http://192.168.0.8:38109 https://ifconfig.me/ip
 
 ## Примечания
 
-На docker02 должен быть установлен kernel module AmneziaWG.
+Клиент зафиксирован на AWG 2.0 и принудительно использует amneziawg-go. Kernel-модуль AmneziaWG на Docker-хосте не требуется.
 
 Проверка модуля:
 

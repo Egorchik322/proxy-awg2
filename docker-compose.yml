@@ -1,6 +1,8 @@
 services:
   awg2:
     build: .
+    image: proxy-awg2-awg2:awg2-v2-pinned
+    pull_policy: never
     container_name: awg2
     privileged: true
     cap_add:
@@ -13,6 +15,14 @@ services:
       - ./awg-config:/config:ro
     ports:
       - "192.168.0.8:38109:38108"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pgrep -x amneziawg-go >/dev/null && ip link show awg0 >/dev/null 2>&1
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
     restart: unless-stopped
 
   proxy-awg2:
@@ -26,5 +36,7 @@ services:
     volumes:
       - ./resolv.conf:/etc/resolv.conf:ro
     depends_on:
-      - awg2
+      awg2:
+        condition: service_healthy
+        restart: true
     restart: unless-stopped
