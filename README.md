@@ -1,120 +1,115 @@
 # proxy-awg2
 
-HTTP-прокси с выходом в интернет через туннель AmneziaWG 2.0.
+Изолированный HTTP CONNECT proxy через клиентский AmneziaWG 3.1.
 
-Проект работает на `docker02`. Адрес прокси в локальной сети:
-
-```text
-http://192.168.0.8:38109
-```
+Проект рассчитан на Linux + Docker Compose. VPN-контейнер и proxy-контейнер используют один сетевой namespace; default route хоста не изменяется.
 
 ## Архитектура
 
-Compose запускает два контейнера:
-
-- `awg2` поднимает VPN-интерфейс `awg0`.
-- `proxy-awg2` запускает `dumbproxy` в сетевом пространстве `awg2`.
-
 ```text
-LAN-клиент
-  -> 192.168.0.8:38109
-  -> dumbproxy
-  -> awg0
-  -> AmneziaWG 2.0
-  -> интернет
+LAN client
+  -> 192.168.0.8:38109/tcp
+  -> proxy-awg2 (dumbproxy)
+  -> awg2 (AmneziaWG userspace)
+  -> AmneziaWG server
+  -> internet
 ```
 
-VPN-маршрутизация изолирована внутри контейнера и не изменяет маршруты хоста `docker02`.
+`awg2` запускает `amneziawg-go v3.1.20260814`, а `awg-quick` и `awg` берутся из `amneziawg-tools v3.1.20260812`. Исходники закреплены тегами и полными commit SHA в `Dockerfile`.
 
-`start.sh` добавляет маршрут для `192.168.0.0/24` через `eth0`, чтобы ответы клиентам локальной сети не уходили в VPN.
+## Требования
 
-## Совместимость
+- Docker Engine и Docker Compose plugin;
+- `/dev/net/tun` на host;
+- `CAP_NET_ADMIN`/privileged для VPN-контейнера;
+- готовая клиентская конфигурация AmneziaWG 3.1;
+- endpoint и ключи, совместимые с серверной стороной.
 
-Клиент зафиксирован на AWG 2.0:
+## Секретная конфигурация
 
-- `amneziawg-go v0.2.19`
-- `amneziawg-tools v1.0.20260618-2`
+Не коммитьте рабочий конфиг. Создайте root-only каталог и файл:
 
-Туннель принудительно использует `amneziawg-go`. Kernel-модуль AmneziaWG на Docker-хосте не требуется.
-
-Это позволяет работать с self-hosted сервером AWG 2.0, даже если на `docker02` установлен kernel-модуль AWG 3.0.
-
-Версии клиента нельзя обновлять без проверки совместимости с сервером.
-
-## Локальная конфигурация
-
-Рабочие файлы, которые не коммитятся:
-
-```text
-awg-config/awg0.conf
-resolv.conf
+```bash
+sudo install -d -m 0700 /root/awg-client
+sudo install -m 0600 -o root -g root awg0.conf /root/awg-client/awg0.conf
 ```
 
-Примеры конфигурации:
+Публичный шаблон находится в `awg-config/awg0.conf.example`. Он содержит только placeholders. Рабочие `awg-config/*.conf` исключены через `.gitignore`.
 
-```text
-awg-config/awg0.conf.example
-resolv.conf.example
+Для нестандартного расположения конфига задайте `AWG_CONFIG_DIR`:
+
+```bash
+export AWG_CONFIG_DIR=/root/awg-client
+docker compose up -d --wait --wait-timeout 60
 ```
 
 ## Сборка и запуск
 
 ```bash
-cd /opt/docker/proxy-awg2
 docker compose build awg2
 docker compose up -d --wait --wait-timeout 60
 ```
 
-## Управление
+Локальный proxy endpoint: `http://192.168.0.8:38109`.
 
-```bash
-# Состояние
-docker compose ps
-
-# Перезапуск
-docker compose restart
-
-# Полное пересоздание
-docker compose down
-docker compose up -d --wait --wait-timeout 60
-
-# Остановка
-docker compose down
-```
-
-Контейнер `awg2` имеет healthcheck. `proxy-awg2` запускается после готовности VPN и использует:
-
-```yaml
-network_mode: "service:awg2"
-```
+До запуска убедитесь, что endpoint в конфиге разрешён вашей политикой доступа и серверная сторона использует совместимую версию AmneziaWG.
 
 ## Проверка
 
 ```bash
+docker compose ps
 docker exec awg2 pgrep -a amneziawg-go
 docker exec awg2 ip -brief link show awg0
+docker exec awg2 ip -brief addr show awg0
 docker exec awg2 awg show awg0
 ```
 
-Проверка HTTP-прокси:
+Проверка proxy:
 
 ```bash
-curl -fsS --max-time 30 \
+curl --fail --silent --show-error --max-time 30 \
   --proxy http://192.168.0.8:38109 \
   https://api.ipify.org
 echo
 ```
 
-Просмотр журналов:
+Проверка маршрутов должна выполняться внутри контейнера и на host отдельно:
 
 ```bash
-docker compose logs --tail 200 awg2
-docker compose logs --tail 200 proxy-awg2
+docker exec awg2 ip route show table all
+docker exec awg2 ip rule show
+ip route
+ip rule
 ```
 
-## Безопасность Git
+Host default route не должен меняться. SSH и LAN должны оставаться доступными.
 
-Перед отправкой изменений:
+## Обновление конфигурации
+
+1. Сохраните старый конфиг и image digest.
+2. Замените `/root/awg-client/awg0.conf` атомарно.
+3. Проверьте права `0600 root:root`.
+4. Пересоздайте только `awg2` и `proxy-awg2`.
+5. Дождитесь healthcheck и проверьте handshake/RX/TX.
+6. Проверьте proxy endpoint и DNS.
+
+Не добавляйте `::/0` и IPv6 default route, если серверный профиль их не предусматривает.
+
+## Rollback
+
+```bash
+docker compose down
+git diff
+docker image ls --no-trunc
+# восстановить сохранённый awg0.conf и прежний image tag
+docker compose up -d --wait --wait-timeout 60
+```
+
+Не удаляйте backup до завершения acceptance window.
+
+## Публикация в GitHub
+
+Перед push проверьте:
 
 ```bash
 git status --short
@@ -122,15 +117,16 @@ git ls-files
 git diff --cached
 ```
 
-В Git не должны попадать:
+В репозитории не должны находиться:
 
 ```text
-awg-config/awg0.conf
+/root/awg-client/awg0.conf
+awg-config/*.conf
 resolv.conf
 .env
 *.key
 *.pem
 *.log
-state/
-tmp/
 ```
+
+Публичный репозиторий содержит код запуска, Compose, шаблон конфигурации и инструкции. Приватные ключи, PSK, `HeaderProtectionKey`, endpoint и полные клиентские конфигурации публиковать запрещено.

@@ -1,7 +1,7 @@
 services:
   awg2:
     build: .
-    image: proxy-awg2-awg2:awg2-v2-pinned
+    image: proxy-awg2-awg31:3.1.20260814
     pull_policy: never
     container_name: awg2
     privileged: true
@@ -12,7 +12,7 @@ services:
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
     volumes:
-      - ./awg-config:/config:ro
+      - ${AWG_CONFIG_DIR:-/root/awg-client}:/config:ro
     ports:
       - "192.168.0.8:38109:38108"
     healthcheck:
@@ -26,7 +26,7 @@ services:
     restart: unless-stopped
 
   proxy-awg2:
-    image: ghcr.io/senseunit/dumbproxy:latest
+    image: ghcr.io/senseunit/dumbproxy@sha256:d395e5741f292d0aac9488319e90333e94a4db2fd5a1faad5f1606cc9a143610
     container_name: proxy-awg2
     network_mode: "service:awg2"
     entrypoint: ["/dumbproxy"]
