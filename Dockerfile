@@ -1,16 +1,19 @@
 FROM golang:bookworm AS awg-go-builder
 
+ARG AWG_GO_TAG=v3.1.20260814
+ARG AWG_GO_COMMIT=1b86b2ae0e493e7ea93f8c1a0f0cb6735b1551f1
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        git make ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone \
-      --branch v0.2.19 \
+      --branch "${AWG_GO_TAG}" \
       --depth 1 \
       https://github.com/amnezia-vpn/amneziawg-go.git \
       /src/amneziawg-go \
-    && test "$(git -C /src/amneziawg-go rev-parse --short=7 HEAD)" = "1cc9427"
+    && test "$(git -C /src/amneziawg-go rev-parse HEAD)" = "${AWG_GO_COMMIT}"
 
 WORKDIR /src/amneziawg-go
 
@@ -20,17 +23,20 @@ RUN make \
 
 FROM debian:bookworm AS awg-tools-builder
 
+ARG AWG_TOOLS_TAG=v3.1.20260812
+ARG AWG_TOOLS_COMMIT=ee0f0a9aa34ff0a0da4b3433b9512781cfe02843
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        git make gcc libc6-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone \
-      --branch v1.0.20260618-2 \
+      --branch "${AWG_TOOLS_TAG}" \
       --depth 1 \
       https://github.com/amnezia-vpn/amneziawg-tools.git \
       /src/amneziawg-tools \
-    && test "$(git -C /src/amneziawg-tools rev-parse --short=7 HEAD)" = "61e7417"
+    && test "$(git -C /src/amneziawg-tools rev-parse HEAD)" = "${AWG_TOOLS_COMMIT}"
 
 WORKDIR /src/amneziawg-tools/src
 
@@ -60,22 +66,10 @@ COPY --from=awg-tools-builder \
   /usr/local/bin/awg-quick \
   /usr/local/bin/awg-quick
 
-# AWG 2.0 must use amneziawg-go even when an AWG 3.0 kernel module
-# is available on the Docker host.
-RUN sed -i '/^add_if() {$/,/^}$/c\
-add_if() {\
-    cmd "${WG_QUICK_USERSPACE_IMPLEMENTATION:-amneziawg-go}" "$INTERFACE"\
-}' /usr/local/bin/awg-quick \
-    && grep -A3 '^add_if()' /usr/local/bin/awg-quick
-
 COPY start.sh /start.sh
 
 RUN chmod 0755 /start.sh \
-    && mkdir -p /var/run/amneziawg
+    && mkdir -p /var/run/amneziawg \
+    && bash -n /usr/local/bin/awg-quick
 
 ENTRYPOINT ["/start.sh"]
-
-# Repair forced userspace syntax and fail the build if awg-quick is invalid.
-RUN sed -i '/^add_if()/ s/INTERFACE"}/INTERFACE"; }/' /usr/local/bin/awg-quick \
-    && bash -n /usr/local/bin/awg-quick \
-    && grep -A1 '^add_if()' /usr/local/bin/awg-quick

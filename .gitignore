@@ -37,3 +37,11 @@ Thumbs.db
 
 # Local resolver override
 resolv.conf
+
+# AWG 3.1 local config
+/root/awg-client/
+
+# Local generated deployment files
+*.awg31
+README.md.bak-*
+!awg-config/*.conf.example
