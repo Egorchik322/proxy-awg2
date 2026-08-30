@@ -1,7 +1,7 @@
 services:
   awg2:
     build: .
-    image: proxy-awg2-awg31:3.1.20260814
+    image: proxy-awg2-awg31-watchdog:3.1.20260830-fixed2
     pull_policy: never
     container_name: awg2
     privileged: true
@@ -11,14 +11,25 @@ services:
       - /dev/net/tun:/dev/net/tun
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
+    environment:
+      AWG_WATCHDOG_ENABLED: "true"
+      AWG_WATCHDOG_INTERVAL: "15"
+      AWG_HANDSHAKE_MAX_AGE: "180"
+      AWG_WATCHDOG_FAILURES: "3"
+      AWG_RECOVERY_COOLDOWN: "300"
+      AWG_STARTUP_GRACE: "120"
+      AWG_PROXY_PROBE_TIMEOUT: "8"
+      AWG_PROXY_CANARY_URL: "http://1.1.1.1/"
+      AWG_MAX_RECOVERIES: "3"
+      AWG_RECOVERY_WINDOW: "3600"
     volumes:
       - ${AWG_CONFIG_DIR:-/root/awg-client}:/config:ro
     ports:
-      - "192.168.0.8:38109:38108"
+      - "${PROXY_BIND_IP:-192.168.0.8}:${PROXY_PORT:-38109}:38108"
     healthcheck:
       test:
         - CMD-SHELL
-        - pgrep -x amneziawg-go >/dev/null && ip link show awg0 >/dev/null 2>&1
+        - pgrep -x amneziawg-go >/dev/null && ip link show awg0 >/dev/null 2>&1 && awg show awg0 >/dev/null 2>&1
       interval: 5s
       timeout: 3s
       retries: 6
